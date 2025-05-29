@@ -110,13 +110,17 @@ start_process (void *file_name_)
   }
   char **argv_on_stack = (char **)esp;
 
-  // argc'yı stack'e koy
-  esp -= sizeof(int);
-  *(int *)esp = argc;
-
   // Fake return address
   esp -= sizeof(void *);
   *(void **)esp = 0;
+
+  // argv pointer'ı
+  esp -= sizeof(char **);
+  *(char ***)esp = argv_on_stack;
+
+  // argc
+  esp -= sizeof(int);
+  *(int *)esp = argc;
 
   // Stack pointer'ı güncelle
   if_.esp = esp;
