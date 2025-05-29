@@ -59,12 +59,24 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success;
 
+  // Make a copy of file_name before tokenizing
+  char *fn_copy = palloc_get_page(0);
+  if (fn_copy == NULL)
+    thread_exit();
+  strlcpy(fn_copy, file_name, PGSIZE);
+
   // Argümanları ayrıştır
   char *argv[64];
   int argc = 0;
   char *token, *save_ptr;
-  for (token = strtok_r(file_name, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr)) {
-    argv[argc++] = token;
+  
+  // Parse the command line
+  for (token = strtok_r(fn_copy, " ", &save_ptr); 
+       token != NULL && argc < 64;
+       token = strtok_r(NULL, " ", &save_ptr)) 
+  {
+    argv[argc] = token;
+    argc++;
   }
 
   /* Initialize interrupt frame and load executable. */
@@ -73,73 +85,59 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
 
-  // Sadece program adını gönder
+  // Load the executable
   success = load (argv[0], &if_.eip, &if_.esp);
 
-  /* If load failed, quit. */
-  palloc_free_page (file_name);
-  if (!success) 
-    thread_exit ();
+  if (!success) {
+    palloc_free_page(fn_copy);
+    thread_exit();
+  }
 
-  // Argümanları stack'e yerleştir
+  // Setup the stack
   void *esp = if_.esp;
   char *arg_ptrs[64];
 
-  // 1. Argüman stringlerini stack'e kopyala (ters sırayla)
+  // Copy arguments to stack
   for (int i = argc - 1; i >= 0; i--) {
     size_t len = strlen(argv[i]) + 1;
     esp -= len;
-    memcpy(esp, argv[i], len);
+    strlcpy(esp, argv[i], len);
     arg_ptrs[i] = esp;
   }
 
-  // 2. Word-align (4 byte hizalama)
-  uintptr_t align = (uintptr_t)esp % 4;
-  if (align) {
-    esp -= align;
-    memset(esp, 0, align);
-  }
+  // Word-align
+  esp = (void *)((unsigned int)(esp) & ~3);
 
-  // 3. argv[argc] = NULL
-  esp -= sizeof(char *);
+  // Push NULL sentinel
+  esp -= 4;
   *(char **)esp = NULL;
 
-  // 4. argv[] array'ini yerleştir
+  // Push argument addresses
   for (int i = argc - 1; i >= 0; i--) {
-    esp -= sizeof(char *);
+    esp -= 4;
     *(char **)esp = arg_ptrs[i];
   }
 
-  // argv array'inin başlangıç adresini sakla
-  char **argv_start = (char **)esp;
+  // Push argv
+  char **argv_addr = esp;
+  esp -= 4;
+  *(char ***)esp = argv_addr;
 
-  // 5. argv pointer
-  esp -= sizeof(char **);
-  *(char ***)esp = argv_start;
-
-  // 6. argc
-  esp -= sizeof(int);
+  // Push argc
+  esp -= 4;
   *(int *)esp = argc;
 
-  // 7. Fake return address
-  esp -= sizeof(void *);
+  // Push return address
+  esp -= 4;
   *(void **)esp = 0;
 
-  // Stack pointer'ı güncelle
+  // Update stack pointer
   if_.esp = esp;
 
-  printf("Debug: argc = %d\n", argc);
-  printf("Debug: argv[0] = %s\n", argv[0]);
-  printf("Debug: Initial esp = %p\n", esp);
+  // Free the copy of command line
+  palloc_free_page(fn_copy);
 
-  // Stack işlemleri sırasında
-  for (int i = argc - 1; i >= 0; i--) {
-    printf("Debug: Copying arg %d: %s\n", i, argv[i]);
-  }
-
-  printf("Debug: Final esp = %p\n", esp);
-
-  /* Start the user process by simulating a return from an interrupt. */
+  /* Start the user process */
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
 }
