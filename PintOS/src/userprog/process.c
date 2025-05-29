@@ -128,6 +128,17 @@ start_process (void *file_name_)
   // Stack pointer'ı güncelle
   if_.esp = esp;
 
+  printf("Debug: argc = %d\n", argc);
+  printf("Debug: argv[0] = %s\n", argv[0]);
+  printf("Debug: Initial esp = %p\n", esp);
+
+  // Stack işlemleri sırasında
+  for (int i = argc - 1; i >= 0; i--) {
+    printf("Debug: Copying arg %d: %s\n", i, argv[i]);
+  }
+
+  printf("Debug: Final esp = %p\n", esp);
+
   /* Start the user process by simulating a return from an interrupt. */
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
