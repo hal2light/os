@@ -85,7 +85,7 @@ start_process (void *file_name_)
   void *esp = if_.esp;
   char *arg_ptrs[64];
 
-  // Argüman stringlerini stack'e kopyala (ters sırayla)
+  // 1. Argüman stringlerini stack'e kopyala (ters sırayla)
   for (int i = argc - 1; i >= 0; i--) {
     size_t len = strlen(argv[i]) + 1;
     esp -= len;
@@ -93,34 +93,37 @@ start_process (void *file_name_)
     arg_ptrs[i] = esp;
   }
 
-  // Word-align (4 byte hizalama)
+  // 2. Word-align (4 byte hizalama)
   uintptr_t align = (uintptr_t)esp % 4;
   if (align) {
     esp -= align;
     memset(esp, 0, align);
   }
 
-  // Argüman işaretçilerini (argv[]) stack'e koy
+  // 3. argv[argc] = NULL
   esp -= sizeof(char *);
-  *(char **)esp = NULL; // argv[argc] = NULL
+  *(char **)esp = NULL;
 
+  // 4. argv[] array'ini yerleştir
   for (int i = argc - 1; i >= 0; i--) {
     esp -= sizeof(char *);
     *(char **)esp = arg_ptrs[i];
   }
-  char **argv_on_stack = (char **)esp;
 
-  // Fake return address
-  esp -= sizeof(void *);
-  *(void **)esp = 0;
+  // argv array'inin başlangıç adresini sakla
+  char **argv_start = (char **)esp;
 
-  // argv pointer'ı
+  // 5. argv pointer
   esp -= sizeof(char **);
-  *(char ***)esp = argv_on_stack;
+  *(char ***)esp = argv_start;
 
-  // argc
+  // 6. argc
   esp -= sizeof(int);
   *(int *)esp = argc;
+
+  // 7. Fake return address
+  esp -= sizeof(void *);
+  *(void **)esp = 0;
 
   // Stack pointer'ı güncelle
   if_.esp = esp;
