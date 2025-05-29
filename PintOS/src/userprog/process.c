@@ -38,8 +38,13 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  /* Sadece program adını thread_create'e gönder. */
+  char prog_name[PGSIZE];
+  strlcpy(prog_name, file_name, PGSIZE);
+  char *save_ptr;
+  char *token = strtok_r(prog_name, " ", &save_ptr);
+
+  tid = thread_create (token, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -54,24 +59,69 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success;
 
+  // Argümanları ayrıştır
+  char *argv[64];
+  int argc = 0;
+  char *token, *save_ptr;
+  for (token = strtok_r(file_name, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr)) {
+    argv[argc++] = token;
+  }
+
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+
+  // Sadece program adını gönder
+  success = load (argv[0], &if_.eip, &if_.esp);
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success) 
     thread_exit ();
 
-  /* Start the user process by simulating a return from an
-     interrupt, implemented by intr_exit (in
-     threads/intr-stubs.S).  Because intr_exit takes all of its
-     arguments on the stack in the form of a `struct intr_frame',
-     we just point the stack pointer (%esp) to our stack frame
-     and jump to it. */
+  // Argümanları stack'e yerleştir
+  void *esp = if_.esp;
+  char *arg_ptrs[64];
+
+  // Argüman stringlerini stack'e kopyala (ters sırayla)
+  for (int i = argc - 1; i >= 0; i--) {
+    size_t len = strlen(argv[i]) + 1;
+    esp -= len;
+    memcpy(esp, argv[i], len);
+    arg_ptrs[i] = esp;
+  }
+
+  // Word-align (4 byte hizalama)
+  uintptr_t align = (uintptr_t)esp % 4;
+  if (align) {
+    esp -= align;
+    memset(esp, 0, align);
+  }
+
+  // Argüman işaretçilerini (argv[]) stack'e koy
+  esp -= sizeof(char *);
+  *(char **)esp = NULL; // argv[argc] = NULL
+
+  for (int i = argc - 1; i >= 0; i--) {
+    esp -= sizeof(char *);
+    *(char **)esp = arg_ptrs[i];
+  }
+  char **argv_on_stack = (char **)esp;
+
+  // argc'yı stack'e koy
+  esp -= sizeof(int);
+  *(int *)esp = argc;
+
+  // Fake return address
+  esp -= sizeof(void *);
+  *(void **)esp = 0;
+
+  // Stack pointer'ı güncelle
+  if_.esp = esp;
+
+  /* Start the user process by simulating a return from an interrupt. */
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
 }
