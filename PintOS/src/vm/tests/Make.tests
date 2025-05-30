@@ -1,0 +1,17 @@
+tests/vm_TESTS = $(addprefix tests/vm/,\
+page-linear page-parallel page-merge-seq page-merge-par \
+page-merge-stk page-merge-mm page-shuffle \
+mmap-read mmap-close mmap-unmap mmap-overlap \
+mmap-twice mmap-write mmap-exit \
+mmap-shuffle mmap-bad-fd mmap-clean mmap-inherit \
+mmap-misalign mmap-null mmap-over-code \
+mmap-over-data mmap-over-stk mmap-remove \
+mmap-zero mmap-bad-fd2 mmap-bad-fd3 \
+mmap-zero-len mmap-off mmap-bad-off \
+mmap-kernel)
+
+tests/vm_PROGS = $(tests/vm_TESTS)
+
+tests/vm/page-linear_SRC = tests/vm/page-linear.c tests/arc4.c tests/lib.c tests/main.c
+tests/vm/page-parallel_SRC = tests/vm/page-parallel.c tests/arc4.c tests/lib.c tests/main.c
+# ...add other test sources similarly

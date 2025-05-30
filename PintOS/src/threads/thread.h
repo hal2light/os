@@ -119,6 +119,7 @@ struct thread
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
+    struct hash spt;                  /* Supplemental page table */
   };
 
   struct child {

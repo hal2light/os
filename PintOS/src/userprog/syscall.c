@@ -19,10 +19,22 @@ struct proc_file {
 	struct list_elem elem;
 };
 
+struct mmap_file {
+  mapid_t mapid;
+  struct file *file;
+  void *addr;
+  size_t size;
+  struct list_elem elem;
+};
+
+static struct list mmap_list;
+static mapid_t next_mapid = 1;
+
 void
 syscall_init (void) 
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
+  list_init(&mmap_list);
 }
 
 static void
@@ -172,6 +184,17 @@ syscall_handler (struct intr_frame *f UNUSED)
 		release_filesys_lock();
 		break;
 
+		case SYS_MMAP:
+		check_addr(p+2);
+		check_addr(*(p+2));
+		f->eax = mmap(*(p+1),*(p+2));
+		break;
+
+		case SYS_MUNMAP:
+		check_addr(p+1);
+		munmap(*(p+1));
+		break;
+
 
 		default:
 		printf("Default %d\n",*p);
@@ -298,4 +321,102 @@ void close_all_files(struct list* files)
 	}
 
       
+}
+
+mapid_t
+mmap (int fd, void *addr)
+{
+  if (addr == NULL || pg_ofs(addr) != 0 || fd <= 1)
+    return -1;
+    
+  struct file *file = fd_to_file(fd);
+  if (file == NULL)
+    return -1;
+    
+  size_t size = file_length(file);
+  if (size == 0)
+    return -1;
+    
+  // Check for overlap with existing mappings
+  void *end_addr = addr + size;
+  for (void *page = addr; page < end_addr; page += PGSIZE) {
+    if (page_lookup(page) != NULL)
+      return -1;
+  }
+  
+  struct mmap_file *mf = malloc(sizeof(struct mmap_file));
+  if (mf == NULL)
+    return -1;
+    
+  mf->mapid = next_mapid++;
+  mf->file = file_reopen(file);
+  mf->addr = addr;
+  mf->size = size;
+  
+  // Create page table entries
+  size_t offset = 0;
+  for (void *page = addr; page < end_addr; page += PGSIZE) {
+    size_t read_bytes = size - offset < PGSIZE ? size - offset : PGSIZE;
+    size_t zero_bytes = PGSIZE - read_bytes;
+    
+    struct page *p = malloc(sizeof(struct page));
+    if (p == NULL) {
+      munmap(mf->mapid);
+      return -1;
+    }
+    
+    p->addr = page;
+    p->writable = true;
+    p->loaded = false;
+    p->status = PAGE_FILE;
+    p->file = mf->file;
+    p->file_offset = offset;
+    p->file_bytes = read_bytes;
+    p->frame = NULL;
+    
+    if (!page_insert(&thread_current()->spt, p)) {
+      free(p);
+      munmap(mf->mapid);
+      return -1;
+    }
+    
+    offset += read_bytes;
+  }
+  
+  list_push_back(&mmap_list, &mf->elem);
+  return mf->mapid;
+}
+
+void
+munmap (mapid_t mapping)
+{
+  struct list_elem *e;
+  for (e = list_begin(&mmap_list); e != list_end(&mmap_list); e = list_next(e)) {
+    struct mmap_file *mf = list_entry(e, struct mmap_file, elem);
+    if (mf->mapid == mapping) {
+      // Write back dirty pages
+      void *end_addr = mf->addr + mf->size;
+      for (void *page = mf->addr; page < end_addr; page += PGSIZE) {
+        struct page *p = page_lookup(page);
+        if (p != NULL && p->loaded && pagedir_is_dirty(thread_current()->pagedir, page)) {
+          file_write_at(mf->file, page, p->file_bytes, p->file_offset);
+        }
+      }
+      
+      // Remove pages from supplemental page table
+      for (void *page = mf->addr; page < end_addr; page += PGSIZE) {
+        struct page *p = page_lookup(page);
+        if (p != NULL) {
+          hash_delete(&thread_current()->spt, &p->hash_elem);
+          page_free(p);
+        }
+      }
+      
+      // Clean up
+      file_close(mf->file);
+      list_remove(&mf->elem);
+      free(mf);
+      break;
+    }
+  }
 }
