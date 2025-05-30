@@ -326,7 +326,7 @@ void close_all_files(struct list* files)
 mapid_t
 mmap (int fd, void *addr)
 {
-  if (addr == NULL || pg_ofs(addr) != 0 || fd <= 1)
+  if (addr == NULL || pg_ofs(addr) != 0 || fd <= 1 || addr == 0)
     return -1;
     
   struct file *file = fd_to_file(fd);
@@ -337,10 +337,14 @@ mmap (int fd, void *addr)
   if (size == 0)
     return -1;
     
-  // Check for overlap with existing mappings
+  // Check for overlap with code/data segments
+  if ((void *)(addr + size) > PHYS_BASE || addr < USER_VADDR_BASE)
+    return -1;
+
+  // Check page alignment and overlap
   void *end_addr = addr + size;
   for (void *page = addr; page < end_addr; page += PGSIZE) {
-    if (page_lookup(page) != NULL)
+    if (page_lookup(page) != NULL || page == 0)
       return -1;
   }
   
@@ -349,15 +353,18 @@ mmap (int fd, void *addr)
     return -1;
     
   mf->mapid = next_mapid++;
-  mf->file = file_reopen(file);
+  mf->file = file_reopen(file); // Create new file handle
+  if (mf->file == NULL) {
+    free(mf);
+    return -1;
+  }
   mf->addr = addr;
   mf->size = size;
   
   // Create page table entries
-  size_t offset = 0;
+  off_t offset = 0;
   for (void *page = addr; page < end_addr; page += PGSIZE) {
-    size_t read_bytes = size - offset < PGSIZE ? size - offset : PGSIZE;
-    size_t zero_bytes = PGSIZE - read_bytes;
+    size_t read_bytes = (size - offset < PGSIZE ? size - offset : PGSIZE);
     
     struct page *p = malloc(sizeof(struct page));
     if (p == NULL) {
@@ -390,6 +397,7 @@ mmap (int fd, void *addr)
 void
 munmap (mapid_t mapping)
 {
+  acquire_filesys_lock();
   struct list_elem *e;
   for (e = list_begin(&mmap_list); e != list_end(&mmap_list); e = list_next(e)) {
     struct mmap_file *mf = list_entry(e, struct mmap_file, elem);
@@ -398,15 +406,11 @@ munmap (mapid_t mapping)
       void *end_addr = mf->addr + mf->size;
       for (void *page = mf->addr; page < end_addr; page += PGSIZE) {
         struct page *p = page_lookup(page);
-        if (p != NULL && p->loaded && pagedir_is_dirty(thread_current()->pagedir, page)) {
-          file_write_at(mf->file, page, p->file_bytes, p->file_offset);
-        }
-      }
-      
-      // Remove pages from supplemental page table
-      for (void *page = mf->addr; page < end_addr; page += PGSIZE) {
-        struct page *p = page_lookup(page);
         if (p != NULL) {
+          if (p->loaded && pagedir_is_dirty(thread_current()->pagedir, page)) {
+            file_seek(mf->file, p->file_offset);
+            file_write(mf->file, page, p->file_bytes);
+          }
           hash_delete(&thread_current()->spt, &p->hash_elem);
           page_free(p);
         }
@@ -419,4 +423,5 @@ munmap (mapid_t mapping)
       break;
     }
   }
+  release_filesys_lock();
 }

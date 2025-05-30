@@ -23,34 +23,43 @@ page_in(struct page *page)
   if (frame == NULL)
     return false;
     
+  // Pin the frame while we work with it
+  frame_pin(frame);
+  
+  bool success = false;
   switch (page->status) {
     case PAGE_FILE:
       // Load from file
-      if (file_read_at(page->file, frame, page->file_bytes, page->file_offset) 
-          != (int) page->file_bytes) {
-        frame_free(frame);
-        return false;
+      file_seek(page->file, page->file_offset);
+      if (file_read(page->file, frame, page->file_bytes) 
+          == (int) page->file_bytes) {
+        // Zero the rest of the page
+        if (page->file_bytes < PGSIZE)
+          memset(frame + page->file_bytes, 0, PGSIZE - page->file_bytes);
+        success = true;
       }
       break;
       
     case PAGE_SWAP:
-      // Load from swap
       swap_in(page->swap_slot, frame);
+      success = true;
       break;
       
     default:
-      frame_free(frame);
-      return false;
+      break;
   }
   
-  if (!install_page(page->addr, frame, page->writable)) {
-    frame_free(frame);
-    return false;
+  if (success && install_page(page->addr, frame, page->writable)) {
+    page->frame = frame;
+    page->loaded = true;
+    page->status = PAGE_MEMORY;
+    frame_unpin(frame);
+    return true;
   }
   
-  page->frame = frame;
-  page->status = PAGE_MEMORY;
-  return true;
+  frame_unpin(frame);
+  frame_free(frame);
+  return false;
 }
 
 bool
