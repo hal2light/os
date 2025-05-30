@@ -123,11 +123,9 @@ kill (struct intr_frame *f)
 static void
 page_fault (struct intr_frame *f) 
 {
-  bool not_present;  /* True: not-present page, false: writing r/o page. */
-  bool write;        /* True: access was write, false: access was read. */
-  bool user;         /* True: access by user, false: access by kernel. */
-  void *fault_addr;  /* Fault address. */
-
+  void *fault_addr;
+  bool not_present, write, user;
+  
   /* Get the fault address */
   asm ("movl %%cr2, %0" : "=r" (fault_addr));
 
@@ -136,28 +134,65 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
+  /* Store user ESP for kernel faults */
+  if (!user)
+    thread_current()->user_esp = f->esp;
+
+  /* Check validity of memory access */
+  if (!is_user_vaddr(fault_addr) || pg_round_down(fault_addr) == NULL)
+    goto fail;
+
+  void *esp = user ? f->esp : thread_current()->user_esp;
+
   /* Handle stack growth */
-  if (!not_present && write) {
-    if (fault_addr >= PHYS_BASE - MAX_STACK_SIZE && 
-        fault_addr >= f->esp - 32) {
-      void *new_page = frame_allocate(PAL_USER | PAL_ZERO);
-      if (new_page != NULL) {
-        return; /* Success */
+  if (not_present) {
+    /* Validate stack access: within max size and reasonable growth */
+    if ((esp - 32 <= fault_addr && fault_addr <= esp) ||
+        (fault_addr >= esp && fault_addr < PHYS_BASE - 32)) {
+      
+      void *upage = pg_round_down(fault_addr);
+      if (PHYS_BASE - STACK_MAX <= upage && upage < PHYS_BASE) {
+        
+        void *kpage = frame_allocate(PAL_USER | PAL_ZERO);
+        if (kpage != NULL) {
+          struct page *p = malloc(sizeof(struct page));
+          if (p) {
+            p->addr = upage;
+            p->writable = true;
+            p->loaded = true;
+            p->status = PAGE_MEMORY;
+            p->file = NULL;
+            p->frame = kpage;
+            
+            if (page_insert(&thread_current()->spt, p) &&
+                install_page(upage, kpage, true)) {
+              return;
+            }
+            free(p);
+          }
+          frame_free(kpage);
+        }
       }
     }
   }
 
-  /* Look up page in supplemental page table */
-  struct page *page = page_lookup(fault_addr);
-  if (page != NULL && page_in(page))
-    return;
+  /* Handle page-in from file or swap */
+  struct page *page = page_lookup(pg_round_down(fault_addr));
+  if (page != NULL) {
+    if (!page->writable && write)
+      goto fail;
+      
+    if (page_in(page))
+      return;
+  }
 
-  /* Kill process if invalid access */
+fail:
+  /* Kill the process */
   printf ("Page fault at %p: %s error %s page in %s context.\n",
           fault_addr,
           not_present ? "not present" : "rights violation",
           write ? "writing" : "reading",
           user ? "user" : "kernel");
-  kill (f);
+  exit_proc(-1);
 }
 

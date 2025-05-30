@@ -326,72 +326,72 @@ void close_all_files(struct list* files)
 mapid_t
 mmap (int fd, void *addr)
 {
-  if (addr == NULL || pg_ofs(addr) != 0 || fd <= 1 || addr == 0)
+  if (addr == NULL || pg_ofs(addr) != 0 || addr == 0 || 
+      fd <= 1 || fd >= MAX_FILES)
     return -1;
-    
+
   struct file *file = fd_to_file(fd);
   if (file == NULL)
     return -1;
     
-  size_t size = file_length(file);
-  if (size == 0)
-    return -1;
-    
-  // Check for overlap with code/data segments
-  if ((void *)(addr + size) > PHYS_BASE || addr < USER_VADDR_BASE)
+  size_t file_size = file_length(file);
+  if (file_size == 0)
     return -1;
 
-  // Check page alignment and overlap
-  void *end_addr = addr + size;
+  // Check for overlap with code/data segments and stack
+  void *end_addr = addr + file_size;
+  if (end_addr >= PHYS_BASE || addr < USER_VADDR_BASE)
+    return -1;
+
   for (void *page = addr; page < end_addr; page += PGSIZE) {
-    if (page_lookup(page) != NULL || page == 0)
+    if (pagedir_get_page(thread_current()->pagedir, page) != NULL)
       return -1;
   }
-  
-  struct mmap_file *mf = malloc(sizeof(struct mmap_file));
-  if (mf == NULL)
+
+  struct mmap_entry *me = malloc(sizeof(struct mmap_entry));
+  if (me == NULL)
     return -1;
-    
-  mf->mapid = next_mapid++;
-  mf->file = file_reopen(file); // Create new file handle
-  if (mf->file == NULL) {
-    free(mf);
+
+  me->mapid = thread_current()->next_mapid++;
+  me->file = file_reopen(file);  // Important: create new file handle
+  if (me->file == NULL) {
+    free(me);
     return -1;
   }
-  mf->addr = addr;
-  mf->size = size;
-  
-  // Create page table entries
-  off_t offset = 0;
+  me->addr = addr;
+  me->size = file_size;
+
+  size_t offset = 0;
   for (void *page = addr; page < end_addr; page += PGSIZE) {
-    size_t read_bytes = (size - offset < PGSIZE ? size - offset : PGSIZE);
+    size_t read_bytes = (file_size - offset < PGSIZE ? file_size - offset : PGSIZE);
     
     struct page *p = malloc(sizeof(struct page));
-    if (p == NULL) {
-      munmap(mf->mapid);
-      return -1;
-    }
-    
+    if (p == NULL)
+      goto error;
+
     p->addr = page;
     p->writable = true;
     p->loaded = false;
     p->status = PAGE_FILE;
-    p->file = mf->file;
+    p->file = me->file;
     p->file_offset = offset;
     p->file_bytes = read_bytes;
     p->frame = NULL;
-    
+
     if (!page_insert(&thread_current()->spt, p)) {
       free(p);
-      munmap(mf->mapid);
-      return -1;
+      goto error;
     }
-    
+
     offset += read_bytes;
   }
-  
-  list_push_back(&mmap_list, &mf->elem);
-  return mf->mapid;
+
+  list_push_back(&thread_current()->mmap_list, &me->elem);
+  return me->mapid;
+
+error:
+  munmap(me->mapid);
+  return -1;
 }
 
 void

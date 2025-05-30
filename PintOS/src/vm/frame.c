@@ -61,44 +61,49 @@ frame_free(void *frame)
   lock_release(&frame_lock);
 }
 
+static struct frame_entry *
+frame_lookup(void *frame)
+{
+  struct list_elem *e;
+  for (e = list_begin(&frame_list); e != list_end(&frame_list); e = list_next(e)) {
+    struct frame_entry *entry = list_entry(e, struct frame_entry, elem);
+    if (entry->frame == frame)
+      return entry;
+  }
+  return NULL;
+}
+
 static void* 
 frame_evict(void)
 {
+  size_t tries = 0;
   struct frame_entry *victim = NULL;
-  struct list_elem *e = clock_hand;
-  
-  if (e == NULL)
-    e = list_begin(&frame_list);
+
+  while (tries < 2 * list_size(&frame_list)) {
+    if (clock_hand == NULL || clock_hand == list_end(&frame_list))
+      clock_hand = list_begin(&frame_list);
+
+    victim = list_entry(clock_hand, struct frame_entry, elem);
+    clock_hand = list_next(clock_hand);
     
-  while (true) {
-    if (e == list_end(&frame_list))
-      e = list_begin(&frame_list);
+    if (!victim->pinned && victim->page != NULL) {
+      struct thread *t = thread_current();
       
-    victim = list_entry(e, struct frame_entry, elem);
-    if (!victim->pinned) {
-      // Check accessed bit
-      if (!pagedir_is_accessed(victim->page->owner->pagedir, victim->page->addr)) {
-        // Found victim
-        break;
+      if (!pagedir_is_accessed(t->pagedir, victim->page->addr)) {
+        void *frame = victim->frame;
+        
+        if (page_out(victim->page)) {
+          list_remove(&victim->elem);
+          free(victim);
+          return frame;
+        }
+      } else {
+        pagedir_set_accessed(t->pagedir, victim->page->addr, false);
       }
-      // Clear accessed bit and continue
-      pagedir_set_accessed(victim->page->owner->pagedir, victim->page->addr, false);
     }
-    e = list_next(e);
+    tries++;
   }
-  
-  clock_hand = list_next(e);
-  
-  if (victim != NULL) {
-    void *frame = victim->frame;
-    if (victim->page != NULL) {
-      page_out(victim->page);
-    }
-    list_remove(&victim->elem);
-    free(victim);
-    return frame;
-  }
-  
+
   return NULL;
 }
 

@@ -26,6 +26,9 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 
+/* Maximum size of user stack, in bytes. */
+#define STACK_MAX (8 * 1024 * 1024)      /* 8 MB */
+
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -120,6 +123,8 @@ struct thread
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
     struct hash spt;                  /* Supplemental page table */
+
+    uint8_t *user_esp;           /* User stack pointer for page faults */
   };
 
   struct child {

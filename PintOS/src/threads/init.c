@@ -125,7 +125,10 @@ main (void)
   ide_init ();
   locate_block_devices ();
   filesys_init (format_filesys);
-#endif
+
+  /* Initialize virtual memory system. */
+  frame_init();
+  swap_init();
 
   printf ("Boot complete.\n");
   
