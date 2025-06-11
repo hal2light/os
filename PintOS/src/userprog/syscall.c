@@ -1,11 +1,19 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
+#include <stdlib.h>    // Add this for malloc/free
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
-#include "list.h"
-#include "process.h"
+#include "userprog/pagedir.h"
+#include "threads/init.h"
+#include "filesys/filesys.h"
+#include "filesys/file.h"
+#include "filesys/directory.h"
+#include "devices/input.h"
+#include "devices/shutdown.h"
+#include "userprog/process.h"
+#include "threads/malloc.h"    // Alternative for memory allocation
 
 static void syscall_handler (struct intr_frame *);
 void* check_addr(const void*);
