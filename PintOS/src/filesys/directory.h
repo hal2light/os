@@ -5,10 +5,7 @@
 #include <stddef.h>
 #include "devices/block.h"
 
-/* Maximum length of a file name component.
-   This is the traditional UNIX maximum length.
-   After directories are implemented, this maximum length may be
-   retained, but much longer full path names must be allowed. */
+/* Maximum length of a file name component. */
 #define NAME_MAX 14
 
 struct inode;
@@ -23,8 +20,12 @@ struct inode *dir_get_inode (struct dir *);
 
 /* Reading and writing. */
 bool dir_lookup (const struct dir *, const char *name, struct inode **);
-bool dir_add (struct dir *, const char *name, block_sector_t);
+bool dir_add (struct dir *, const char *name, block_sector_t, bool is_dir);
 bool dir_remove (struct dir *, const char *name);
 bool dir_readdir (struct dir *, char name[NAME_MAX + 1]);
+
+/* Path traversal */
+struct dir *dir_open_path (const char *path);
+char *get_next_part (char *part, const char **srcp);
 
 #endif /* filesys/directory.h */

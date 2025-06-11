@@ -601,3 +601,44 @@ install_page (void *upage, void *kpage, bool writable)
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
 }
+
+bool
+process_start (const char *file_name) 
+{
+  char *fn_copy;
+  char *f_name;
+  tid_t tid;
+  
+  /* Make a copy of FILE_NAME.
+     Otherwise there's a race between the caller and load(). */
+  fn_copy = palloc_get_page (0);
+  if (fn_copy == NULL)
+    return TID_ERROR;
+  strlcpy (fn_copy, file_name, PGSIZE);
+  char *save_ptr;
+  f_name = malloc(strlen(file_name)+1);
+  strlcpy (f_name, file_name, strlen(file_name)+1);
+  f_name = strtok_r (f_name," ",&save_ptr);
+  /* Create a new thread to execute FILE_NAME. */
+  //printf("%d\n", thread_current()->tid);
+  tid = thread_create (f_name, PRI_DEFAULT, start_process, fn_copy);
+  free(f_name);
+  if (tid == TID_ERROR)
+    palloc_free_page (fn_copy);
+
+  sema_down(&thread_current()->child_lock);
+
+  if(!thread_current()->success)
+    return -1;
+
+  /* Initialize file descriptors */
+  list_init (&tid->file_descriptors);
+  
+  /* Inherit parent's current directory */
+  if (thread_current()->cwd != NULL)
+    tid->cwd = dir_reopen(thread_current()->cwd);
+  else
+    tid->cwd = dir_open_root();
+    
+  return tid;
+}

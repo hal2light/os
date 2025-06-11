@@ -172,6 +172,22 @@ syscall_handler (struct intr_frame *f UNUSED)
 		release_filesys_lock();
 		break;
 
+		case SYS_CHDIR:
+        f->eax = sys_chdir((const char *)arg1);
+        break;
+      case SYS_MKDIR:
+        f->eax = sys_mkdir((const char *)arg1);
+        break;
+      case SYS_READDIR:
+        f->eax = sys_readdir((int)arg1, (char *)arg2);
+        break;
+      case SYS_ISDIR:
+        f->eax = sys_isdir((int)arg1);
+        break;
+      case SYS_INUMBER:
+        f->eax = sys_inumber((int)arg1);
+        break;
+
 
 		default:
 		printf("Default %d\n",*p);
