@@ -113,8 +113,8 @@ struct thread
     int waitingon;
 
     /* Filesystem related */
-    struct dir *cwd;                  /* Current working directory */
-    struct list file_descriptors;     /* List of open file descriptors */
+    struct dir *cwd;                  /* Current working directory. */
+    struct list file_descriptors;     /* List of open files. */
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -169,5 +169,7 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
 bool cmp_waketick(struct list_elem *first, struct list_elem *second, void *aux);
+
+struct thread *thread_get_by_tid(tid_t tid);
 
 #endif /* threads/thread.h */

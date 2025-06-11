@@ -3,11 +3,12 @@
 #include <inttypes.h>
 #include <round.h>
 #include <stdio.h>
-#include <stdlib.h>    // Add this for malloc/free/calloc
+#include <stdlib.h>    // For malloc/free/calloc
 #include <string.h>
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
+#include "userprog/syscall.h"  // For exit_proc
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
@@ -16,6 +17,7 @@
 #include "threads/interrupt.h"
 #include "threads/palloc.h"
 #include "threads/thread.h"
+#include "threads/synch.h"    // For filesystem locks
 #include "threads/vaddr.h"
 
 // Add function prototypes
@@ -614,35 +616,33 @@ install_page (void *upage, void *kpage, bool writable)
 bool
 process_start (const char *file_name) 
 {
-    char *f_name;
-    struct thread *t;
-    
-    f_name = malloc(strlen(file_name)+1);
-    if (f_name == NULL)
+    char *fn_copy;
+    tid_t tid;
+
+    /* Make a copy of FILE_NAME. */
+    fn_copy = palloc_get_page(0);
+    if (fn_copy == NULL)
         return TID_ERROR;
-    
-    strlcpy(f_name, file_name, strlen(file_name) + 1);
-    
+    strlcpy(fn_copy, file_name, PGSIZE);
+
     /* Create a new thread to execute FILE_NAME. */
-    tid_t tid = thread_create(f_name, PRI_DEFAULT, start_process, f_name);
-    free(f_name);
-    
+    tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy);
     if (tid == TID_ERROR)
-        return false;
-        
-    // Get the created thread
-    t = thread_get_by_tid(tid);
-    if (t == NULL)
-        return false;
-        
-    /* Initialize file descriptors */
-    list_init(&t->file_descriptors);
-    
-    /* Inherit parent's current directory */
-    if (thread_current()->cwd != NULL)
-        t->cwd = dir_reopen(thread_current()->cwd);
-    else
-        t->cwd = dir_open_root();
-        
+        palloc_free_page(fn_copy);
     return tid != TID_ERROR;
+}
+
+/* Define filesystem lock */
+static struct lock filesys_lock;
+
+void 
+acquire_filesys_lock(void) 
+{
+    lock_acquire(&filesys_lock);
+}
+
+void 
+release_filesys_lock(void) 
+{
+    lock_release(&filesys_lock);
 }
