@@ -3,7 +3,7 @@
 #include <inttypes.h>
 #include <round.h>
 #include <stdio.h>
-#include <stdlib.h>
+#include <stdlib.h>    // Add this for malloc/free/calloc
 #include <string.h>
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
@@ -17,6 +17,15 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+
+// Add function prototypes
+static thread_func start_process NO_RETURN;
+static bool load(const char *cmdline, void (**eip) (void), void **esp);
+bool process_start(const char *file_name);
+void exit_proc(int status);
+void acquire_filesys_lock(void);
+void release_filesys_lock(void);
+void close_all_files(struct list *files);
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -605,40 +614,35 @@ install_page (void *upage, void *kpage, bool writable)
 bool
 process_start (const char *file_name) 
 {
-  char *fn_copy;
-  char *f_name;
-  tid_t tid;
-  
-  /* Make a copy of FILE_NAME.
-     Otherwise there's a race between the caller and load(). */
-  fn_copy = palloc_get_page (0);
-  if (fn_copy == NULL)
-    return TID_ERROR;
-  strlcpy (fn_copy, file_name, PGSIZE);
-  char *save_ptr;
-  f_name = malloc(strlen(file_name)+1);
-  strlcpy (f_name, file_name, strlen(file_name)+1);
-  f_name = strtok_r (f_name," ",&save_ptr);
-  /* Create a new thread to execute FILE_NAME. */
-  //printf("%d\n", thread_current()->tid);
-  tid = thread_create (f_name, PRI_DEFAULT, start_process, fn_copy);
-  free(f_name);
-  if (tid == TID_ERROR)
-    palloc_free_page (fn_copy);
-
-  sema_down(&thread_current()->child_lock);
-
-  if(!thread_current()->success)
-    return -1;
-
-  /* Initialize file descriptors */
-  list_init (&tid->file_descriptors);
-  
-  /* Inherit parent's current directory */
-  if (thread_current()->cwd != NULL)
-    tid->cwd = dir_reopen(thread_current()->cwd);
-  else
-    tid->cwd = dir_open_root();
+    char *f_name;
+    struct thread *t;
     
-  return tid;
+    f_name = malloc(strlen(file_name)+1);
+    if (f_name == NULL)
+        return TID_ERROR;
+    
+    strlcpy(f_name, file_name, strlen(file_name) + 1);
+    
+    /* Create a new thread to execute FILE_NAME. */
+    tid_t tid = thread_create(f_name, PRI_DEFAULT, start_process, f_name);
+    free(f_name);
+    
+    if (tid == TID_ERROR)
+        return false;
+        
+    // Get the created thread
+    t = thread_get_by_tid(tid);
+    if (t == NULL)
+        return false;
+        
+    /* Initialize file descriptors */
+    list_init(&t->file_descriptors);
+    
+    /* Inherit parent's current directory */
+    if (thread_current()->cwd != NULL)
+        t->cwd = dir_reopen(thread_current()->cwd);
+    else
+        t->cwd = dir_open_root();
+        
+    return tid != TID_ERROR;
 }
